@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多語字幕編輯器</title>
+<link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <!-- ================= 工具列 ================= -->
+  <header id="toolbar">
+    <h1>🎞️ 多語字幕編輯器</h1>
+    <button class="primary" id="openVideoBtn" title="開啟影片 (Ctrl+O)">開啟影片</button>
+    <button id="openProjBtn" title="開啟之前儲存的專案檔 (.json)">開啟專案</button>
+    <button id="saveProjBtn" title="儲存專案 (Ctrl+S)">儲存專案</button>
+    <span class="sep"></span>
+    <button id="undoBtn" title="復原 (Ctrl+Z)" disabled>↶ 復原</button>
+    <button id="redoBtn" title="重做 (Ctrl+Y)" disabled>↷ 重做</button>
+    <span class="sep"></span>
+    <label title="畫面上主要顯示的字幕語言">顯示
+      <select id="dispPrimary"></select>
+    </label>
+    <label title="同時顯示第二語言（雙語字幕）">＋
+      <select id="dispSecondary"></select>
+    </label>
+    <span class="spacer"></span>
+    <span id="saveState" class="muted"></span>
+    <button class="primary" id="exportBtn" title="輸出字幕檔或影片 (Ctrl+E)">輸出 ⇩</button>
+    <button id="helpBtn" title="說明與快捷鍵 (?)">？</button>
+    <input type="file" id="videoInput" accept="video/*,.mkv,.mov,.m4v,.webm" hidden>
+    <input type="file" id="projInput" accept=".json,application/json" hidden>
+    <input type="file" id="subInput" accept=".srt,.vtt,text/vtt" hidden>
+  </header>
+
+  <div id="workspace">
+    <!-- ================= 左：預覽 + 時間軸 ================= -->
+    <section id="left">
+      <div id="stage">
+        <video id="video" playsinline preload="auto"></video>
+        <canvas id="overlay"></canvas>
+        <div id="stageEmpty">
+          <div class="big">開啟影片開始編輯</div>
+          <div>按上方「開啟影片」或把影片拖進來</div>
+          <div class="muted">影片只在你的電腦上處理，不會上傳</div>
+        </div>
+      </div>
+
+      <div id="transport">
+        <button id="prevCueBtn" title="上一句字幕 (↑)">⏮</button>
+        <button id="playBtn" title="播放 / 暫停 (Space)">▶</button>
+        <button id="nextCueBtn" title="下一句字幕 (↓)">⏭</button>
+        <span id="timeLbl" class="mono">00:00.000 / 00:00.000</span>
+        <span class="sep"></span>
+        <button id="addSubBtn" title="在目前位置新增字幕 (N)">＋字幕</button>
+        <button id="addCmtBtn" title="在目前位置新增註解 (C)">＋註解</button>
+        <span class="sep"></span>
+        <button id="markInBtn" title="設定入點 (I)">入點 I</button>
+        <button id="markOutBtn" title="設定出點 (O)">出點 O</button>
+        <button id="cutBtn" title="剪掉入點到出點之間的片段 (X)">✂ 剪掉區間</button>
+        <button id="keepBtn" title="只保留入點到出點之間，其他剪掉">只保留區間</button>
+        <label title="預覽播放時自動跳過剪掉的片段"><input type="checkbox" id="skipCutsChk" checked> 跳過剪掉片段</label>
+        <span class="spacer"></span>
+        <button id="zoomOutBtn" title="縮小時間軸 (-)">−</button>
+        <button id="zoomFitBtn" title="時間軸顯示整段影片">全部</button>
+        <button id="zoomInBtn" title="放大時間軸 (+)">＋</button>
+      </div>
+
+      <div id="timeline">
+        <div id="tlLabels">
+          <div class="lbl ruler-lbl"></div>
+          <div class="lbl" data-row="wave">聲音</div>
+          <div class="lbl" data-row="cut">剪輯</div>
+          <div class="lbl" data-row="sub">字幕</div>
+          <div class="lbl" data-row="cmt">註解</div>
+        </div>
+        <div id="tlScroll">
+          <div id="tlInner">
+            <canvas id="tlRuler"></canvas>
+            <div class="row" id="rowWave"><canvas id="waveCanvas"></canvas></div>
+            <div class="row" id="rowCut"></div>
+            <div class="row" id="rowSub"></div>
+            <div class="row" id="rowCmt"></div>
+            <div id="tlShades"></div>
+            <div id="tlMark"></div>
+            <div id="tlPlayhead"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 右：編輯面板 ================= -->
+    <aside id="panel">
+      <nav id="tabs">
+        <button data-tab="sub" class="on">字幕</button>
+        <button data-tab="cmt">註解</button>
+        <button data-tab="lang">語言 / 翻譯</button>
+        <button data-tab="style">樣式</button>
+      </nav>
+
+      <div class="tab" id="tab-sub">
+        <div class="tab-actions">
+          <button id="addSubBtn2">＋ 在目前位置新增</button>
+          <button id="importSubBtn" title="匯入 SRT / VTT 字幕檔">匯入字幕檔</button>
+        </div>
+        <div id="subEditor" class="editor-card"></div>
+        <div class="list-head"><span id="subCount"></span><input type="search" id="subSearch" placeholder="搜尋字幕…"></div>
+        <ol id="subList" class="item-list"></ol>
+      </div>
+
+      <div class="tab" id="tab-cmt" hidden>
+        <div class="tab-actions">
+          <button id="addCmtBtn2">＋ 在目前位置新增註解</button>
+        </div>
+        <p class="hint">註解是你自己加在畫面上的說明文字框，可以直接在預覽畫面上拖曳位置，也支援多語言。</p>
+        <div id="cmtEditor" class="editor-card"></div>
+        <div class="list-head"><span id="cmtCount"></span></div>
+        <ol id="cmtList" class="item-list"></ol>
+      </div>
+
+      <div class="tab" id="tab-lang" hidden>
+        <h3>專案語言</h3>
+        <table id="langTable"></table>
+        <div class="row-form">
+          <select id="langPreset"></select>
+          <input id="langCustomCode" placeholder="代碼，如 en" size="6" hidden>
+          <input id="langCustomName" placeholder="名稱，如 English" size="10" hidden>
+          <button id="addLangBtn">加入語言</button>
+        </div>
+
+        <h3>翻譯</h3>
+        <p class="hint">AI 自動翻譯之後會直接接進來。目前可以先用「複製 → 貼到任何 AI 聊天（ChatGPT、Claude…）→ 貼回結果」的方式批次翻譯，字幕與註解會一起處理。</p>
+        <div class="form-grid">
+          <label>來源語言</label><select id="trSource"></select>
+          <label>翻譯成</label><div id="trTargets" class="check-list"></div>
+          <label></label><label class="inline"><input type="checkbox" id="trOnlyMissing" checked> 只翻譯還沒填的項目</label>
+        </div>
+        <div class="row-form">
+          <button class="primary" id="trCopyBtn">① 複製給 AI 的翻譯請求</button>
+        </div>
+        <textarea id="trPaste" rows="5" placeholder="② 把 AI 回覆的內容整段貼在這裡"></textarea>
+        <div class="row-form">
+          <button class="primary" id="trApplyBtn">③ 套用翻譯</button>
+          <span id="trStatus" class="muted"></span>
+        </div>
+      </div>
+
+      <div class="tab" id="tab-style" hidden>
+        <h3>字幕樣式</h3>
+        <div class="form-grid" id="subStyleForm">
+          <label>字體大小</label><div class="range"><input type="range" data-style="sub.size" min="2.5" max="10" step="0.1"><output></output></div>
+          <label>文字顏色</label><input type="color" data-style="sub.color">
+          <label>外框顏色</label><input type="color" data-style="sub.outline">
+          <label>外框粗細</label><div class="range"><input type="range" data-style="sub.outlineW" min="0" max="30" step="1"><output></output></div>
+          <label>底框</label><label class="inline"><input type="checkbox" data-style="sub.box"> 文字加底色方塊</label>
+          <label>底框顏色</label><input type="color" data-style="sub.boxColor">
+          <label>底框透明度</label><div class="range"><input type="range" data-style="sub.boxOpacity" min="0" max="100" step="5"><output></output></div>
+          <label>距離底部</label><div class="range"><input type="range" data-style="sub.bottom" min="0" max="40" step="0.5"><output></output></div>
+          <label>第二語言大小</label><div class="range"><input type="range" data-style="sub.size2" min="40" max="120" step="1"><output></output></div>
+          <label>第二語言顏色</label><input type="color" data-style="sub.color2">
+        </div>
+        <h3>註解樣式</h3>
+        <div class="form-grid">
+          <label>基本大小</label><div class="range"><input type="range" data-style="cmt.size" min="2" max="8" step="0.1"><output></output></div>
+          <label>淡入淡出</label><label class="inline"><input type="checkbox" data-style="cmt.fade"> 出現 / 消失時淡入淡出</label>
+        </div>
+        <p class="hint">樣式會同時套用在預覽與輸出的影片上。每個註解的配色、大小、寬度可在「註解」分頁個別調整。</p>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ================= 對話框：輸出 ================= -->
+  <dialog id="exportDlg">
+    <form method="dialog" class="dlg">
+      <h2>輸出</h2>
+
+      <fieldset>
+        <legend>字幕檔（上傳 YouTube 用）</legend>
+        <p class="hint">YouTube 可以在 YouTube Studio →「字幕」為同一支影片上傳多種語言，觀眾可自行切換，是推廣到多語市場最好的方式。</p>
+        <div class="form-grid">
+          <label>語言</label><div id="exLangs" class="check-list"></div>
+          <label>格式</label>
+          <div>
+            <label class="inline"><input type="radio" name="exFmt" value="srt" checked> SRT</label>
+            <label class="inline"><input type="radio" name="exFmt" value="vtt"> WebVTT</label>
+          </div>
+          <label>時間</label><label class="inline"><input type="checkbox" id="exApplyCuts" checked> 依剪輯後的影片調整時間</label>
+        </div>
+        <div class="row-form"><button type="button" class="primary" id="exSubsBtn">下載字幕檔</button></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>影片（字幕、註解直接燒進畫面）</legend>
+        <p class="hint">適合要上傳到 Instagram、TikTok、Facebook 等沒有多語字幕切換功能的平台。每種語言需各輸出一次。</p>
+        <div class="form-grid">
+          <label>字幕語言</label>
+          <div class="inline-row">
+            <select id="exVPrimary"></select>
+            <span>＋</span>
+            <select id="exVSecondary"></select>
+          </div>
+          <label>內容</label>
+          <div>
+            <label class="inline"><input type="checkbox" id="exVSubs" checked> 字幕</label>
+            <label class="inline"><input type="checkbox" id="exVCmts" checked> 註解</label>
+          </div>
+          <label>解析度</label><select id="exVRes"></select>
+          <label>畫質</label>
+          <select id="exVQuality">
+            <option value="high" selected>高（檔案較大）</option>
+            <option value="medium">中</option>
+            <option value="low">低（檔案較小）</option>
+          </select>
+          <label>音量</label><div class="range"><input type="range" id="exVVolume" min="0" max="200" step="5" value="100"><output></output></div>
+        </div>
+        <div id="exVProgress" hidden>
+          <progress max="1" value="0"></progress>
+          <div class="muted" id="exVStatus"></div>
+        </div>
+        <div class="row-form">
+          <button type="button" class="primary" id="exVideoBtn">輸出 MP4</button>
+          <button type="button" id="exCancelBtn" hidden>取消輸出</button>
+          <span class="muted" id="exVSupport"></span>
+        </div>
+      </fieldset>
+
+      <div class="dlg-foot"><button value="close">關閉</button></div>
+    </form>
+  </dialog>
+
+  <!-- ================= 對話框：選擇語言（匯入字幕用） ================= -->
+  <dialog id="langDlg">
+    <form method="dialog" class="dlg small">
+      <h2 id="langDlgTitle">這個字幕檔是什麼語言？</h2>
+      <select id="langDlgSel"></select>
+      <p class="hint">時間與現有字幕對得上的句子，會合併成同一句的另一個語言版本；對不上的會新增為新的字幕。</p>
+      <div class="dlg-foot">
+        <button value="cancel">取消</button>
+        <button value="ok" class="primary">匯入</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ================= 對話框：說明 ================= -->
+  <dialog id="helpDlg">
+    <form method="dialog" class="dlg">
+      <h2>使用說明</h2>
+      <h3>基本流程</h3>
+      <ol class="steps">
+        <li>開啟影片（取得授權的檔案）。</li>
+        <li>在「字幕」分頁逐句新增字幕：播放到開始的地方按 <kbd>N</kbd>，打字，按 <kbd>Enter</kbd> 接著下一句。</li>
+        <li>用 <kbd>[</kbd> <kbd>]</kbd> 把選取的字幕開始 / 結束對齊到目前播放位置，或在時間軸上直接拖曳。</li>
+        <li>在「註解」分頁加上你自己的說明文字框，在畫面上拖曳擺放位置。</li>
+        <li>在「語言 / 翻譯」加入要推廣的語言並翻譯。</li>
+        <li>「輸出」：下載各語言字幕檔上傳 YouTube，或輸出燒好字幕的 MP4。</li>
+        <li>記得「儲存專案」，之後開啟專案和影片就能繼續編輯。</li>
+      </ol>
+      <h3>快捷鍵</h3>
+      <table class="keys">
+        <tr><td><kbd>Space</kbd></td><td>播放 / 暫停</td></tr>
+        <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>倒退 / 快轉 1 秒（加 <kbd>Shift</kbd> 為 5 秒）</td></tr>
+        <tr><td><kbd>,</kbd> <kbd>.</kbd></td><td>倒退 / 前進一格畫面</td></tr>
+        <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>跳到上一句 / 下一句字幕</td></tr>
+        <tr><td><kbd>N</kbd> / <kbd>C</kbd></td><td>在目前位置新增字幕 / 註解</td></tr>
+        <tr><td><kbd>[</kbd> <kbd>]</kbd></td><td>選取項目的開始 / 結束設為目前位置</td></tr>
+        <tr><td><kbd>Enter</kbd></td><td>編輯選取的項目；在字幕文字框中按 Enter 跳到下一句（<kbd>Shift</kbd>+<kbd>Enter</kbd> 換行）</td></tr>
+        <tr><td><kbd>I</kbd> <kbd>O</kbd> <kbd>X</kbd></td><td>設定入點、出點、剪掉區間</td></tr>
+        <tr><td><kbd>Delete</kbd></td><td>刪除選取的項目</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>取消選取 / 清除入出點 / 離開文字框</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Y</kbd></td><td>復原 / 重做</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>O</kbd> / <kbd>E</kbd></td><td>儲存專案 / 開啟影片 / 輸出</td></tr>
+        <tr><td><kbd>Ctrl</kbd>+滾輪</td><td>在時間軸上縮放</td></tr>
+      </table>
+      <h3>注意事項</h3>
+      <ul>
+        <li>建議使用最新版 Chrome 或 Edge。輸出 MP4 需要瀏覽器支援 WebCodecs。</li>
+        <li>編輯內容會自動暫存在這台電腦的瀏覽器裡，但仍請定期「儲存專案」備份。專案檔不包含影片本身。</li>
+        <li>能開啟的影片格式取決於瀏覽器：MP4、WebM、MOV 大多可以。</li>
+      </ul>
+      <div class="dlg-foot"><button value="close" class="primary">知道了</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast"></div>
+
+  <script src="lib/mediabunny-1.66.5.min.js"></script>
+  <script src="editor.js"></script>
+</body>
+</html>
